@@ -1,2 +1,2 @@
 # logrus-sumo
-SumoLogic Hooks for Logrus
+SumoLogic Hook for Logrus
