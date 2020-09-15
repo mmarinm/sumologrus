@@ -1,4 +1,4 @@
-package logrussumo
+package sumologrus
 
 import (
 	"bytes"
@@ -105,11 +105,11 @@ func (h *SumoLogicHook) Fire(entry *logrus.Entry) error {
 	return nil
 }
 
-func (hook *SumoLogicHook) upload(b []byte) error {
+func (h *SumoLogicHook) upload(b []byte) error {
 	payload := [][]byte{b}
 	req, err := http.NewRequest(
 		"POST",
-		hook.endPointUrl,
+		h.endPointUrl,
 		bytes.NewBuffer(bytes.Join(payload, newline)),
 	)
 	if err != nil {
