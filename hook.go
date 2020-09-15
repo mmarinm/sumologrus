@@ -3,15 +3,13 @@ package sumologrus
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"github.com/segmentio/backo-go"
 	"github.com/sirupsen/logrus"
-	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
-
-	"fmt"
-	"sync"
 )
 
 // Backoff policy.
@@ -22,7 +20,7 @@ type SumoLogicHook struct {
 	tags        []string
 	host        string
 	levels      []logrus.Level
-	logger      *log.Logger
+	logger      *logrus.Logger
 	verbose     bool
 	interval    time.Duration
 	size        int
@@ -30,15 +28,6 @@ type SumoLogicHook struct {
 	msgs     chan interface{}
 	quit     chan struct{}
 	shutdown chan struct{}
-
-	once sync.Once
-	wg   sync.WaitGroup
-
-	// These synchronization primitives are used to control how many goroutines
-	// are spawned by the client for uploads.
-	upmtx   sync.Mutex
-	upcond  sync.Cond
-	upcount int
 }
 
 type SumoLogicMesssage struct {
@@ -54,6 +43,13 @@ var (
 
 func NewSumoLogicHook(endPointUrl string, host string, level logrus.Level, tags ...string) *SumoLogicHook {
 	levels := []logrus.Level{}
+	log := logrus.New()
+	log.Out = os.Stdout
+
+	log.WithFields(logrus.Fields{
+		"application": "sumologrus",
+	})
+
 	for _, l := range []logrus.Level{
 		logrus.PanicLevel,
 		logrus.FatalLevel,
@@ -77,13 +73,14 @@ func NewSumoLogicHook(endPointUrl string, host string, level logrus.Level, tags 
 		tags:        tagList,
 		endPointUrl: endPointUrl,
 		levels:      levels,
+		logger:      log,
+		verbose:     false,
 		interval:    5 * time.Second,
 		size:        250,
 		msgs:        make(chan interface{}, 100),
 		quit:        make(chan struct{}),
 		shutdown:    make(chan struct{}),
 	}
-	hook.upcond.L = &hook.upmtx
 	hook.startLoop()
 	return hook
 }
@@ -103,6 +100,10 @@ func (h *SumoLogicHook) Fire(entry *logrus.Entry) error {
 	h.queue(msg)
 
 	return nil
+}
+
+func (h *SumoLogicHook) queue(msg SumoLogicMesssage) {
+	h.msgs <- msg
 }
 
 func (h *SumoLogicHook) upload(b []byte) error {
@@ -128,26 +129,6 @@ func (h *SumoLogicHook) upload(b []byte) error {
 	return nil
 }
 
-func (h *SumoLogicHook) Levels() []logrus.Level {
-	return h.levels
-}
-
-func (h *SumoLogicHook) Close() error {
-	h.once.Do(h.loop)
-	h.quit <- struct{}{}
-	close(h.msgs)
-	<-h.shutdown
-	return nil
-}
-func (h *SumoLogicHook) queue(msg SumoLogicMesssage) {
-	h.once.Do(h.startLoop)
-	h.msgs <- msg
-}
-
-func (h *SumoLogicHook) startLoop() {
-	go h.loop()
-}
-
 // Send batch request.
 func (h *SumoLogicHook) send(msgs []interface{}) error {
 	if len(msgs) == 0 {
@@ -159,35 +140,26 @@ func (h *SumoLogicHook) send(msgs []interface{}) error {
 		return fmt.Errorf("error marshalling msgs: %s", err)
 	}
 
-	for i := 0; i < 10; i++ {
-		if err = h.upload(b); err == nil {
-			return nil
-		}
-		Backo.Sleep(i)
+	if err = h.upload(b); err == nil {
+		return nil
 	}
 
 	return err
 }
 
-func (h *SumoLogicHook) sendAsync(msgs []interface{}) {
-	h.upmtx.Lock()
-	for h.upcount == 1000 {
-		h.upcond.Wait()
-	}
-	h.upcount++
-	h.upmtx.Unlock()
-	h.wg.Add(1)
-	go func() {
-		err := h.send(msgs)
-		if err != nil {
-			h.logf(err.Error())
-		}
-		h.upmtx.Lock()
-		h.upcount--
-		h.upcond.Signal()
-		h.upmtx.Unlock()
-		h.wg.Done()
-	}()
+func (h *SumoLogicHook) Levels() []logrus.Level {
+	return h.levels
+}
+
+func (h *SumoLogicHook) Flush() error {
+	h.quit <- struct{}{}
+	close(h.msgs)
+	<-h.shutdown
+	return nil
+}
+
+func (h *SumoLogicHook) startLoop() {
+	go h.loop()
 }
 
 func (h *SumoLogicHook) loop() {
@@ -200,13 +172,13 @@ func (h *SumoLogicHook) loop() {
 			msgs = append(msgs, msg)
 			if len(msgs) == h.size {
 				h.log("exceeded %d messages – flushing", h.size)
-				h.sendAsync(msgs)
+				h.send(msgs)
 				msgs = make([]interface{}, 0, h.size)
 			}
 		case <-tick.C:
 			if len(msgs) > 0 {
 				h.log("interval reached - flushing %d", len(msgs))
-				h.sendAsync(msgs)
+				h.send(msgs)
 				msgs = make([]interface{}, 0, h.size)
 			} else {
 				h.log("interval reached – nothing to send")
@@ -220,8 +192,7 @@ func (h *SumoLogicHook) loop() {
 				msgs = append(msgs, msg)
 			}
 			h.log("exit requested – flushing %d", len(msgs))
-			h.sendAsync(msgs)
-			h.wg.Wait()
+			h.send(msgs)
 			h.log("exit")
 			h.shutdown <- struct{}{}
 			return
