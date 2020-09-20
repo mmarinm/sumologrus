@@ -19,3 +19,6 @@ func (e ConfigError) Error() string {
 	return fmt.Sprintf("analytics.NewWithConfig: %s (analytics.Config.%s: %#v)", e.Reason, e.Field, e.Value)
 }
 
+var (
+	ErrClosed = errors.New("the client was already closed")
+)

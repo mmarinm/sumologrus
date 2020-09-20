@@ -99,7 +99,7 @@ func NewWithConfig(c Config) (*SumoLogicHook, error) {
 	return hook, nil
 }
 
-func (h *SumoLogicHook) Fire(entry *logrus.Entry) error {
+func (h *SumoLogicHook) Fire(entry *logrus.Entry) (err error) {
 	data := map[string]interface{}{
 		"message": entry.Message,
 		"fields":  entry.Data,
@@ -111,13 +111,23 @@ func (h *SumoLogicHook) Fire(entry *logrus.Entry) error {
 		Level: strings.ToUpper(entry.Level.String()),
 		Data:  data,
 	}
-	h.queue(msg)
+	err = h.queue(msg)
 
-	return nil
+	return
 }
 
-func (h *SumoLogicHook) queue(msg SumoLogicMesssage) {
+func (h *SumoLogicHook) queue(msg SumoLogicMesssage) (err error) {
+	defer func() {
+		// When the `msgs` channel is closed writing to it will trigger a panic.
+		// To avoid letting the panic propagate to the caller we recover from it
+		// and instead report that the client has been closed and shouldn't be
+		// used anymore.
+		if recover() != nil {
+			err = ErrClosed
+		}
+	}()
 	h.msgs <- msg
+	return
 }
 
 func (h *SumoLogicHook) upload(b []byte) error {
