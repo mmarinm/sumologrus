@@ -16,7 +16,7 @@ The following tables list the configurable parameters
 |`Level`|Log Level|`logrus.PanicLevel`|
 |`Interval`|Time interval to flush logs |`5s`|
 |`BatchSize`|Limits number of batched logs|`100`|
-|`Verbose`|Sumorus hook logs to stdout|`false`|
+|`Verbose`|Enables Sumorus hook logs|`false`|
 
 
 ## Usage
