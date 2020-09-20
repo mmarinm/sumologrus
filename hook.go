@@ -2,14 +2,16 @@ package sumologrus
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
-	"github.com/segmentio/backo-go"
-	"github.com/sirupsen/logrus"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/segmentio/backo-go"
+	"github.com/sirupsen/logrus"
 )
 
 // Backoff policy.
@@ -107,11 +109,23 @@ func (h *SumoLogicHook) queue(msg SumoLogicMesssage) {
 }
 
 func (h *SumoLogicHook) upload(b []byte) error {
-	payload := [][]byte{b}
+	payload := bytes.Join([][]byte{b}, newline)
+
+	// gzip the bytes to be uploaded
+	var buf bytes.Buffer
+	g := gzip.NewWriter(&buf)
+	if _, err := g.Write(payload); err != nil {
+		return err
+	}
+
+	if err := g.Close(); err != nil {
+		return err
+	}
+
 	req, err := http.NewRequest(
 		"POST",
 		h.endPointUrl,
-		bytes.NewBuffer(bytes.Join(payload, newline)),
+		&buf,
 	)
 	if err != nil {
 		fmt.Println("error creating sumologic request", err)
