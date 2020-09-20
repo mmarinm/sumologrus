@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/segmentio/backo-go"
 	"github.com/sirupsen/logrus"
 	"net/http"
 	"os"
@@ -12,11 +11,8 @@ import (
 	"time"
 )
 
-// Backoff policy.
-var Backo = backo.DefaultBacko()
-
 type SumoLogicHook struct {
-	endPointUrl string
+	endPointURL string
 	tags        []string
 	host        string
 	levels      []logrus.Level
@@ -41,7 +37,23 @@ var (
 	newline = []byte{'\n'}
 )
 
-func NewSumoLogicHook(endPointUrl string, host string, level logrus.Level, tags ...string) *SumoLogicHook {
+func New(endPointUrl string, host string, level logrus.Level, tags ...string) *SumoLogicHook {
+	cfg := Config{
+		EndPointURL: endPointUrl,
+		Host:        host,
+		Level:       level,
+		Tags:        tags,
+	}
+	hook, _ := NewWithConfig(makeConfig(cfg))
+
+	return hook
+}
+
+func NewWithConfig(c Config) (*SumoLogicHook, error) {
+	if err := c.validate(); err != nil {
+		return nil, err
+	}
+
 	levels := []logrus.Level{}
 	log := logrus.New()
 	log.Out = os.Stdout
@@ -58,34 +70,36 @@ func NewSumoLogicHook(endPointUrl string, host string, level logrus.Level, tags 
 		logrus.InfoLevel,
 		logrus.DebugLevel,
 	} {
-		if l <= level {
+		if l <= c.Level {
 			levels = append(levels, l)
 		}
 	}
 
 	var tagList []string
-	for _, tag := range tags {
+	for _, tag := range c.Tags {
 		tagList = append(tagList, tag)
 	}
 
 	hook := &SumoLogicHook{
-		host:        host,
+		host:        c.Host,
 		tags:        tagList,
-		endPointUrl: endPointUrl,
+		endPointURL: c.EndPointURL,
 		levels:      levels,
 		logger:      log,
-		verbose:     false,
-		interval:    5 * time.Second,
-		size:        250,
+		verbose:     c.Verbose,
+		interval:    c.Interval,
+		size:        c.BatchSize,
 		msgs:        make(chan interface{}, 100),
 		quit:        make(chan struct{}),
 		shutdown:    make(chan struct{}),
 	}
+
 	hook.startLoop()
-	return hook
+
+	return hook, nil
 }
 
-func (h *SumoLogicHook) Fire(entry *logrus.Entry) error {
+func (h *SumoLogicHook) Fire(entry *logrus.Entry) (err error) {
 	data := map[string]interface{}{
 		"message": entry.Message,
 		"fields":  entry.Data,
@@ -97,20 +111,30 @@ func (h *SumoLogicHook) Fire(entry *logrus.Entry) error {
 		Level: strings.ToUpper(entry.Level.String()),
 		Data:  data,
 	}
-	h.queue(msg)
+	err = h.queue(msg)
 
-	return nil
+	return
 }
 
-func (h *SumoLogicHook) queue(msg SumoLogicMesssage) {
+func (h *SumoLogicHook) queue(msg SumoLogicMesssage) (err error) {
+	defer func() {
+		// When the `msgs` channel is closed writing to it will trigger a panic.
+		// To avoid letting the panic propagate to the caller we recover from it
+		// and instead report that the client has been closed and shouldn't be
+		// used anymore.
+		if recover() != nil {
+			err = ErrClosed
+		}
+	}()
 	h.msgs <- msg
+	return
 }
 
 func (h *SumoLogicHook) upload(b []byte) error {
 	payload := [][]byte{b}
 	req, err := http.NewRequest(
 		"POST",
-		h.endPointUrl,
+		h.endPointURL,
 		bytes.NewBuffer(bytes.Join(payload, newline)),
 	)
 	if err != nil {
@@ -118,7 +142,10 @@ func (h *SumoLogicHook) upload(b []byte) error {
 		return err
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 
 	if err != nil {
@@ -163,7 +190,7 @@ func (h *SumoLogicHook) startLoop() {
 }
 
 func (h *SumoLogicHook) loop() {
-	// Batch send the current log lines each Intervl
+	// Batch send the current log lines each Interval
 	tick := time.NewTicker(h.interval)
 	var msgs []interface{}
 	for {
