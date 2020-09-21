@@ -3,7 +3,9 @@ jobs:
   build-go112:
     docker:
       - image: circleci/golang:1.12
-    working_directory: /sumologrus
+    environment:
+      GO111MODULE: "on"
+    working_directory: /go/src/github.com/mmarinm/sumologrus
     steps:
       - checkout
       - run: make ci
