@@ -138,7 +138,6 @@ func (h *SumoLogicHook) upload(b []byte) error {
 		bytes.NewBuffer(bytes.Join(payload, newline)),
 	)
 	if err != nil {
-		fmt.Println("error creating sumologic request", err)
 		return err
 	}
 
