@@ -65,7 +65,7 @@ var host = "YOUR_HOST_NAME"
 
 func main() {
 	log := logrus.New()
-	sumoLogicHook := sumologrus.NewWithConfig(sumologrus.Config{
+	sumoLogicHook, err := sumologrus.NewWithConfig(sumologrus.Config{
 		EndPointURL: endpoint, 
 		Tags: []string{"tag1", "tag2"},
 		Host: host, 
@@ -74,6 +74,10 @@ func main() {
 		BatchSize: 10,
 		Verbose: true,
 	})
+	if err != nil {
+		panic(err)
+	}
+	
 	defer sumoLogicHook.Flush()
 	log.Hooks.Add(sumoLogicHook)
 
