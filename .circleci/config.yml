@@ -11,13 +11,13 @@ jobs:
     steps:
       - checkout
       - run:
-        name: Test
-        command: make ci
+          name: Run Test
+          command: make ci
       - codecov/upload:
           file: /temp/cover.txt
           conf: .codecov.yml
 
-
+          
 workflows:
   version: 2
   build:
