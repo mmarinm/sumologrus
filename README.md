@@ -1,4 +1,7 @@
-# SumoLogic Hook for [Logrus](https://github.com/sirupsen/logrus) <img src="http://i.imgur.com/hTeVwmJ.png" width="40" height="40" alt=":walrus:" class="emoji" title=":walrus:"/>
+# sumologrus
+[![deepcode](https://www.deepcode.ai/api/gh/badge?key=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJwbGF0Zm9ybTEiOiJnaCIsIm93bmVyMSI6Im1tYXJpbm0iLCJyZXBvMSI6InN1bW9sb2dydXMiLCJpbmNsdWRlTGludCI6ZmFsc2UsImF1dGhvcklkIjoyMjg0NiwiaWF0IjoxNjAwNjUwOTIyfQ.mkL4nI8anw9ebEVB6yeAfW4uIt_BqkX7sgpC6rgO7UQ)](https://www.deepcode.ai/app/gh/mmarinm/sumologrus/_/dashboard?utm_content=gh%2Fmmarinm%2Fsumologrus)
+
+SumoLogic Hook for [Logrus](https://github.com/sirupsen/logrus) <img src="http://i.imgur.com/hTeVwmJ.png" width="40" height="40" alt=":walrus:" class="emoji" title=":walrus:"/>
 
 ## Description
 sumologrus is async Logrus hook. Logs are flushed to Sumologic periodically (5 sec), if size of the batch reaches 250 logs or by explicitly calling Flush method
