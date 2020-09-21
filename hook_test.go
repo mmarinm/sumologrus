@@ -28,7 +28,7 @@ func mockServer() (chan string, *httptest.Server) {
 
 func TestHook(t *testing.T) {
 	t.Run("Should flush the logs when Flush is called", func(t *testing.T) {
-		// t.Skip()
+		var m sync.Mutex
 		var got, want string
 		want = `[
 			{
@@ -59,8 +59,12 @@ func TestHook(t *testing.T) {
 		body, server := mockServer()
 		defer server.Close()
 
-		hook := New(server.URL, "admin-lambda-test", logrus.InfoLevel)
-		hook.verbose = true
+		hook, _ := NewWithConfig(makeConfig(Config{
+			EndPointURL: server.URL,
+			Host:        "admin-lambda-test",
+			Level:       logrus.InfoLevel,
+			Verbose:     true,
+		}))
 
 		log := logrus.New()
 		log.SetFormatter(&logrus.TextFormatter{TimestampFormat: time.RFC3339, FullTimestamp: true})
@@ -78,12 +82,16 @@ func TestHook(t *testing.T) {
 
 		go func() {
 			for b := range body {
+				m.Lock()
 				got = b
+				m.Unlock()
 			}
 		}()
 		hook.Flush()
 
+		m.Lock()
 		assert.JSONEq(t, want, got)
+		m.Unlock()
 	})
 
 	t.Run("Should flush the logs after interval", func(t *testing.T) {
@@ -100,17 +108,20 @@ func TestHook(t *testing.T) {
 			  },
 			  "host": "admin-lambda-test",
 			  "level": "ERROR",
-			  "tags": null
+			  "tags": ["tag1", "tag2"]
 			}
 		]`
 		body, server := mockServer()
 		defer server.Close()
 
-		m.Lock()
-		hook := New(server.URL, "admin-lambda-test", logrus.InfoLevel)
-		hook.interval = 100 * time.Millisecond
-		hook.verbose = true
-		m.Unlock()
+		hook, _ := NewWithConfig(makeConfig(Config{
+			EndPointURL: server.URL,
+			Host:        "admin-lambda-test",
+			Level:       logrus.InfoLevel,
+			Tags:        []string{"tag1", "tag2"},
+			Interval:    100 * time.Millisecond,
+			Verbose:     true,
+		}))
 
 		log := logrus.New()
 		log.SetFormatter(&logrus.TextFormatter{TimestampFormat: time.RFC3339, FullTimestamp: true})
@@ -123,13 +134,17 @@ func TestHook(t *testing.T) {
 
 		go func() {
 			for b := range body {
+				m.Lock()
 				got = b
+				m.Unlock()
 			}
 		}()
 		time.Sleep(150 * time.Millisecond)
 		hook.Flush()
 
+		m.Lock()
 		assert.JSONEq(t, want, got)
+		m.Unlock()
 	})
 
 	t.Run("Should flush the logs if batch size is reached", func(t *testing.T) {
@@ -146,7 +161,7 @@ func TestHook(t *testing.T) {
 			  },
 			  "host": "admin-lambda-test",
 			  "level": "ERROR",
-			  "tags": null
+			  "tags": ["tag1", "tag2"]
 			}]`
 		want2 = `[
 			{
@@ -159,15 +174,19 @@ func TestHook(t *testing.T) {
 			  },
 			  "host": "admin-lambda-test",
 			  "level": "ERROR",
-			  "tags": null
+			  "tags": ["tag1", "tag2"]
 			}]`
 
 		body, server := mockServer()
 		defer server.Close()
 
-		hook := New(server.URL, "admin-lambda-test", logrus.InfoLevel)
-		hook.verbose = true
-		hook.size = 1
+		hook, _ := NewWithConfig(makeConfig(Config{
+			EndPointURL: server.URL,
+			Host:        "admin-lambda-test",
+			Level:       logrus.InfoLevel,
+			Tags:        []string{"tag1", "tag2"},
+			BatchSize:   1,
+		}))
 
 		log := logrus.New()
 		log.SetFormatter(&logrus.TextFormatter{TimestampFormat: time.RFC3339, FullTimestamp: true})
