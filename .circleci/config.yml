@@ -3,7 +3,7 @@ jobs:
   build-go112:
     docker:
       - image: circleci/golang:1.12
-    working_directory: /go/src/github.com/segmentio/analytics-go
+    working_directory: /go/src/github.com/mmarinm/sumologrus
     steps:
       - checkout
       - run: make ci
