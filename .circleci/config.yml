@@ -1,4 +1,6 @@
-version: 2
+version: 2.1
+orbs:
+  codecov: codecov/codecov@1.0.5
 jobs:
   build-go112:
     docker:
@@ -8,7 +10,12 @@ jobs:
     working_directory: /go/src/github.com/mmarinm/sumologrus
     steps:
       - checkout
-      - run: make ci
+      - run:
+        name: Test
+        command: make ci
+      - codecov/upload:
+          file: /temp/cover.txt
+          conf: .codecov.yml
 
 
 workflows:
@@ -16,3 +23,4 @@ workflows:
   build:
     jobs:
       - build-go112
+
