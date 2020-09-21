@@ -19,17 +19,17 @@ const DefaultInterval = 5 * time.Second
 const DefaultBatchSize = 100
 
 func (c *Config) validate() error {
-	if c.Interval < 0 {
+	if c.Interval <= 0 {
 		return ConfigError{
-			Reason: "negative time intervals are not supported",
+			Reason: "negative or 0 time intervals are not supported",
 			Field:  "Interval",
 			Value:  c.Interval,
 		}
 	}
 
-	if c.BatchSize < 0 {
+	if c.BatchSize <= 0 {
 		return ConfigError{
-			Reason: "negative batch sizes are not supported",
+			Reason: "negative or 0 batch sizes are not supported",
 			Field:  "BatchSize",
 			Value:  c.BatchSize,
 		}
