@@ -10,6 +10,7 @@ jobs:
     working_directory: /go/src/github.com/mmarinm/sumologrus
     steps:
       - checkout
+      - build
       - run:
           name: Run Test
           command: make ci
@@ -17,7 +18,7 @@ jobs:
           file: /temp/cover.txt
           conf: .codecov.yml
 
-          
+
 workflows:
   version: 2
   build:
