@@ -14,7 +14,7 @@ jobs:
           name: Run Test
           command: make ci
       - codecov/upload:
-          file: /temp/cover.txt
+          file: ./tmp/cover.txt
           conf: .codecov.yml
 
 
