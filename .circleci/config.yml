@@ -10,7 +10,6 @@ jobs:
     working_directory: /go/src/github.com/mmarinm/sumologrus
     steps:
       - checkout
-      - build
       - run:
           name: Run Test
           command: make ci
