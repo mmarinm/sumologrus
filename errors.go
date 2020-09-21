@@ -1,8 +1,8 @@
 package sumologrus
 
 import (
-	"fmt"
 	"errors"
+	"fmt"
 )
 
 // ConfigError is returned by the `NewWithConfig` function when the one of the configuration
@@ -16,7 +16,7 @@ type ConfigError struct {
 }
 
 func (e ConfigError) Error() string {
-	return fmt.Sprintf("analytics.NewWithConfig: %s (analytics.Config.%s: %#v)", e.Reason, e.Field, e.Value)
+	return fmt.Sprintf("NewWithConfig: %s Config.%s: %v", e.Reason, e.Field, e.Value)
 }
 
 var (

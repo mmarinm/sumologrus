@@ -232,7 +232,3 @@ func (h *SumoLogicHook) log(msg string, args ...interface{}) {
 		h.logger.Printf(msg, args...)
 	}
 }
-
-func (h *SumoLogicHook) logf(msg string, args ...interface{}) {
-	h.logger.Printf(msg, args...)
-}

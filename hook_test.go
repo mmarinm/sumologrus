@@ -27,6 +27,30 @@ func mockServer() (chan string, *httptest.Server) {
 }
 
 func TestHook(t *testing.T) {
+	t.Run("Should error if invalid configs", func(t *testing.T) {
+		expectedErrorString1 := "NewWithConfig: negative or 0 time intervals are not supported Config.Interval: -100ms"
+		expectedErrorString2 := "NewWithConfig: negative or 0 batch sizes are not supported Config.BatchSize: -10"
+		_, err1 := NewWithConfig(makeConfig(Config{
+			EndPointURL: "https://example.com",
+			Host:        "admin-lambda-test",
+			Level:       logrus.InfoLevel,
+			Tags:        []string{"tag1", "tag2"},
+			Interval:    -100 * time.Millisecond,
+			Verbose:     true,
+		}))
+
+		_, err2 := NewWithConfig(makeConfig(Config{
+			EndPointURL: "https://example.com",
+			Host:        "admin-lambda-test",
+			Level:       logrus.InfoLevel,
+			Tags:        []string{"tag1", "tag2"},
+			Verbose:     true,
+			BatchSize:   -10,
+		}))
+
+		assert.EqualError(t, err1, expectedErrorString1)
+		assert.EqualError(t, err2, expectedErrorString2)
+	})
 	t.Run("Should flush the logs when Flush is called", func(t *testing.T) {
 		var m sync.Mutex
 		var got, want string
@@ -59,12 +83,7 @@ func TestHook(t *testing.T) {
 		body, server := mockServer()
 		defer server.Close()
 
-		hook, _ := NewWithConfig(makeConfig(Config{
-			EndPointURL: server.URL,
-			Host:        "admin-lambda-test",
-			Level:       logrus.InfoLevel,
-			Verbose:     true,
-		}))
+		hook := New(server.URL, "admin-lambda-test", logrus.InfoLevel)
 
 		log := logrus.New()
 		log.SetFormatter(&logrus.TextFormatter{TimestampFormat: time.RFC3339, FullTimestamp: true})
