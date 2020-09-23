@@ -36,7 +36,6 @@ func TestHook(t *testing.T) {
 			Level:       logrus.InfoLevel,
 			Tags:        []string{"tag1", "tag2"},
 			Interval:    -100 * time.Millisecond,
-			Verbose:     true,
 		}))
 
 		_, err2 := NewWithConfig(makeConfig(Config{
@@ -44,7 +43,6 @@ func TestHook(t *testing.T) {
 			Host:        "admin-lambda-test",
 			Level:       logrus.InfoLevel,
 			Tags:        []string{"tag1", "tag2"},
-			Verbose:     true,
 			BatchSize:   -10,
 		}))
 
@@ -168,26 +166,13 @@ func TestHook(t *testing.T) {
 
 	t.Run("Should flush the logs if batch size is reached", func(t *testing.T) {
 		var m sync.Mutex
-		var got1, got2, want1, want2 string
+		var got1, want1 string
 		want1 = `[
 			{
 			  "data": {
 				"fields": {
 				  "age": 33,
 				  "name": "kate"
-				},
-				"message": "Hello world!"
-			  },
-			  "host": "admin-lambda-test",
-			  "level": "ERROR",
-			  "tags": ["tag1", "tag2"]
-			}]`
-		want2 = `[
-			{
-			  "data": {
-				"fields": {
-				  "age": 32,
-				  "name": "sawyer"
 				},
 				"message": "Hello world!"
 			  },
@@ -216,32 +201,20 @@ func TestHook(t *testing.T) {
 			"age":  33,
 		}).Error("Hello world!")
 
-		log.WithFields(logrus.Fields{
-			"name": "sawyer",
-			"age":  32,
-		}).Error("Hello world!")
-
-		cnt := 0
 		go func() {
 			for b := range body {
 				m.Lock()
-				cnt++
-				if cnt == 1 {
-					got1 = b
-				}
-				if cnt == 2 {
-					got2 = b
-				}
-
+				got1 = b
 				m.Unlock()
 			}
 		}()
 
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
+		hook.Flush()
+
 		m.Lock()
 		assert.JSONEq(t, want1, got1)
-		assert.JSONEq(t, want2, got2)
 		m.Unlock()
-		hook.Flush()
+
 	})
 }
