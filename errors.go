@@ -20,5 +20,11 @@ func (e ConfigError) Error() string {
 }
 
 var (
+	// This error is returned by methods of the `Client` interface when they are
+	// called after the client was already closed.
 	ErrClosed = errors.New("the client was already closed")
+
+	// This error is used to notify the application that too many requests are
+	// already being sent and no more messages can be accepted.
+	ErrTooManyRequests = errors.New("too many requests are already in-flight")
 )
