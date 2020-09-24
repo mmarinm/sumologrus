@@ -19,7 +19,7 @@ The following tables list the configurable parameters
 |`Host`|Sumologic host|`""`|
 |`Level`|Log Level|`logrus.PanicLevel`|
 |`Interval`|Time interval to flush logs |`5s`|
-|`BatchSize`|Limits number of batched logs|`100`|
+|`BatchSize`|Limits number of batched logs|`250`|
 |`Verbose`|Enables Sumorus hook logs|`false`|
 
 
