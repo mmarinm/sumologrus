@@ -4,7 +4,8 @@
 SumoLogic Hook for [Logrus](https://github.com/sirupsen/logrus) <img src="http://i.imgur.com/hTeVwmJ.png" width="40" height="40" alt=":walrus:" class="emoji" title=":walrus:"/>
 
 ## Description
-Sumologic hook for logrus that helps upload logs to [Sumologic HTTP Source](https://help.sumologic.com/03Send-Data/Sources/02Sources-for-Hosted-Collectors/HTTP-Source/Upload-Data-to-an-HTTP-Source) . Logs are flushed to Sumologic periodically (5 sec), when size of the batch reaches 250 logs or by explicitly calling Flush method
+Sumologic hook for logrus helps upload logs to [Sumologic HTTP Source](https://help.sumologic.com/03Send-Data/Sources/02Sources-for-Hosted-Collectors/HTTP-Source/Upload-Data-to-an-HTTP-Source) asynchronously. Logs are flushed to Sumologic periodically (5 sec), when size of the batch reaches 250 logs or by explicitly calling Flush method.
+For real time logs set batch size to 1
 
 
 ## Configuration
