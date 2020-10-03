@@ -1,0 +1,26 @@
+version: 2.1
+orbs:
+  codecov: codecov/codecov@1.0.5
+jobs:
+  build-go112:
+    docker:
+      - image: circleci/golang:1.12
+    environment:
+      GO111MODULE: "on"
+    working_directory: /go/src/github.com/mmarinm/sumologrus
+    steps:
+      - checkout
+      - run:
+          name: Run Test
+          command: make ci
+      - codecov/upload:
+          file: ./tmp/coverage.txt
+          conf: .codecov.yml
+
+
+workflows:
+  version: 2
+  build:
+    jobs:
+      - build-go112
+

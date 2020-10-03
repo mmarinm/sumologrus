@@ -5,32 +5,16 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"github.com/sirupsen/logrus"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/segmentio/backo-go"
 	"github.com/sirupsen/logrus"
 )
-
-// Backoff policy.
-var Backo = backo.DefaultBacko()
-
-type SumoLogicHook struct {
-	endPointUrl string
-	tags        []string
-	host        string
-	levels      []logrus.Level
-	logger      *logrus.Logger
-	verbose     bool
-	interval    time.Duration
-	size        int
-
-	msgs     chan interface{}
-	quit     chan struct{}
-	shutdown chan struct{}
-}
 
 type SumoLogicMesssage struct {
 	Tags  []string    `json:"tags"`
@@ -39,11 +23,44 @@ type SumoLogicMesssage struct {
 	Data  interface{} `json:"data"`
 }
 
+type SumoLogicHook struct {
+	endPointURL           string
+	tags                  []string
+	host                  string
+	levels                []logrus.Level
+	logger                *logrus.Logger
+	verbose               bool
+	interval              time.Duration
+	batchSize             int
+	maxConcurrentRequests int
+	retryAfter            func(int) time.Duration
+
+	msgs     chan SumoLogicMesssage
+	quit     chan struct{}
+	shutdown chan struct{}
+}
+
 var (
 	newline = []byte{'\n'}
 )
 
-func NewSumoLogicHook(endPointUrl string, host string, level logrus.Level, tags ...string) *SumoLogicHook {
+func New(endPointUrl string, host string, level logrus.Level, tags ...string) *SumoLogicHook {
+	cfg := Config{
+		EndPointURL: endPointUrl,
+		Host:        host,
+		Level:       level,
+		Tags:        tags,
+	}
+	hook, _ := NewWithConfig(makeConfig(cfg))
+
+	return hook
+}
+
+func NewWithConfig(c Config) (*SumoLogicHook, error) {
+	if err := c.validate(); err != nil {
+		return nil, err
+	}
+
 	levels := []logrus.Level{}
 	log := logrus.New()
 	log.Out = os.Stdout
@@ -60,34 +77,38 @@ func NewSumoLogicHook(endPointUrl string, host string, level logrus.Level, tags 
 		logrus.InfoLevel,
 		logrus.DebugLevel,
 	} {
-		if l <= level {
+		if l <= c.Level {
 			levels = append(levels, l)
 		}
 	}
 
 	var tagList []string
-	for _, tag := range tags {
+	for _, tag := range c.Tags {
 		tagList = append(tagList, tag)
 	}
 
 	hook := &SumoLogicHook{
-		host:        host,
-		tags:        tagList,
-		endPointUrl: endPointUrl,
-		levels:      levels,
-		logger:      log,
-		verbose:     false,
-		interval:    5 * time.Second,
-		size:        250,
-		msgs:        make(chan interface{}, 100),
-		quit:        make(chan struct{}),
-		shutdown:    make(chan struct{}),
+		host:                  c.Host,
+		tags:                  tagList,
+		endPointURL:           c.EndPointURL,
+		levels:                levels,
+		logger:                log,
+		verbose:               c.Verbose,
+		interval:              c.Interval,
+		batchSize:             c.BatchSize,
+		maxConcurrentRequests: c.maxConcurrentRequests,
+		retryAfter:            c.RetryAfter,
+		msgs:                  make(chan SumoLogicMesssage, 100),
+		quit:                  make(chan struct{}),
+		shutdown:              make(chan struct{}),
 	}
+
 	hook.startLoop()
-	return hook
+
+	return hook, nil
 }
 
-func (h *SumoLogicHook) Fire(entry *logrus.Entry) error {
+func (h *SumoLogicHook) Fire(entry *logrus.Entry) (err error) {
 	data := map[string]interface{}{
 		"message": entry.Message,
 		"fields":  entry.Data,
@@ -99,13 +120,23 @@ func (h *SumoLogicHook) Fire(entry *logrus.Entry) error {
 		Level: strings.ToUpper(entry.Level.String()),
 		Data:  data,
 	}
-	h.queue(msg)
+	err = h.queue(msg)
 
-	return nil
+	return
 }
 
-func (h *SumoLogicHook) queue(msg SumoLogicMesssage) {
+func (h *SumoLogicHook) queue(msg SumoLogicMesssage) (err error) {
+	defer func() {
+		// When the `msgs` channel is closed writing to it will trigger a panic.
+		// To avoid letting the panic propagate to the caller we recover from it
+		// and instead report that the client has been closed and shouldn't be
+		// used anymore.
+		if recover() != nil {
+			err = ErrClosed
+		}
+	}()
 	h.msgs <- msg
+	return
 }
 
 func (h *SumoLogicHook) upload(b []byte) error {
@@ -124,52 +155,92 @@ func (h *SumoLogicHook) upload(b []byte) error {
 
 	req, err := http.NewRequest(
 		"POST",
-		h.endPointUrl,
+		h.endPointURL,
 		&buf,
 	)
 	if err != nil {
-		fmt.Println("error creating sumologic request", err)
+		h.errorf("creating request - %s", err)
 		return err
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
-
 	if err != nil {
-		return fmt.Errorf("error sending sumologic request: %s", err)
+		h.errorf("sending request - %s", err)
+		return err
 	}
 
-	resp.Body.Close()
+	defer resp.Body.Close()
 	return nil
-}
-
-// Send batch request.
-func (h *SumoLogicHook) send(msgs []interface{}) error {
-	if len(msgs) == 0 {
-		return nil
-	}
-
-	b, err := json.Marshal(msgs)
-	if err != nil {
-		return fmt.Errorf("error marshalling msgs: %s", err)
-	}
-
-	if err = h.upload(b); err == nil {
-		return nil
-	}
-
-	return err
 }
 
 func (h *SumoLogicHook) Levels() []logrus.Level {
 	return h.levels
 }
 
-func (h *SumoLogicHook) Flush() error {
-	h.quit <- struct{}{}
-	close(h.msgs)
+func (h *SumoLogicHook) Flush() (err error) {
+	defer func() {
+		// Always recover, a panic could be raised if `h`.quit was closed which
+		// means the method was called more than once.
+		if recover() != nil {
+			err = ErrClosed
+		}
+	}()
+
+	close(h.quit)
 	<-h.shutdown
-	return nil
+	return
+}
+
+// Asychronously send a batched requests.
+func (h *SumoLogicHook) sendAsync(msgs []SumoLogicMesssage, wg *sync.WaitGroup, ex *executor) {
+	wg.Add(1)
+
+	if !ex.do(func() {
+		defer wg.Done()
+		defer func() {
+			// In case a bug is introduced in the send function that triggers
+			// a panic, we don't want this to ever crash the application so we
+			// catch it here and log it instead.
+			if err := recover(); err != nil {
+				h.errorf("panic - %s", err)
+			}
+		}()
+		h.send(msgs)
+	}) {
+		wg.Done()
+		h.errorf("sending messages failed - %s", ErrTooManyRequests)
+	}
+}
+
+// Send batch request.
+func (h *SumoLogicHook) send(msgs []SumoLogicMesssage) {
+	const attempts = 10
+
+	b, err := json.Marshal(msgs)
+	if err != nil {
+		h.errorf("marshalling messages - %s", err)
+		return
+	}
+
+	for i := 0; i != attempts; i++ {
+		if err = h.upload(b); err == nil {
+			return
+		}
+
+		// Wait for either a retry timeout or the client to be closed.
+		select {
+		case <-time.After(h.retryAfter(i)):
+		case <-h.quit:
+			h.errorf("%d messages dropped because they failed to be sent and the client was closed", len(msgs))
+			return
+		}
+	}
+
+	h.errorf("%d messages dropped because they failed to be sent after %d attempts", len(msgs), attempts)
 }
 
 func (h *SumoLogicHook) startLoop() {
@@ -177,41 +248,67 @@ func (h *SumoLogicHook) startLoop() {
 }
 
 func (h *SumoLogicHook) loop() {
-	// Batch send the current log lines each Intervl
+	defer close(h.shutdown)
+	wg := &sync.WaitGroup{}
+	defer wg.Wait()
+	// Batch send the current log lines each Interval
 	tick := time.NewTicker(h.interval)
-	var msgs []interface{}
+	defer tick.Stop()
+
+	ex := newExecutor(h.maxConcurrentRequests)
+	defer ex.close()
+
+	mq := messageQueue{
+		maxBatchSize:  h.batchSize,
+		maxBatchBytes: maxBatchBytes,
+	}
+
 	for {
 		select {
 		case msg := <-h.msgs:
-			msgs = append(msgs, msg)
-			if len(msgs) == h.size {
-				h.log("exceeded %d messages – flushing", h.size)
-				h.send(msgs)
-				msgs = make([]interface{}, 0, h.size)
-			}
+			h.push(&mq, msg, wg, ex)
 		case <-tick.C:
-			if len(msgs) > 0 {
-				h.log("interval reached - flushing %d", len(msgs))
-				h.send(msgs)
-				msgs = make([]interface{}, 0, h.size)
-			} else {
-				h.log("interval reached – nothing to send")
-			}
+			h.flush(&mq, wg, ex)
 		case <-h.quit:
-			tick.Stop()
-			h.log("exit requested – draining msgs")
-			// drain the msg channel.
+			h.debugf("exit requested – draining messages")
+
+			// Drain the msg channel, we have to close it first so no more
+			// messages can be pushed and otherwise the loop would never end.
+			close(h.msgs)
+
 			for msg := range h.msgs {
-				h.log("buffer (%d/%d) %v", len(msgs), h.size, msg)
-				msgs = append(msgs, msg)
+				h.push(&mq, msg, wg, ex)
 			}
-			h.log("exit requested – flushing %d", len(msgs))
-			h.send(msgs)
-			h.log("exit")
-			h.shutdown <- struct{}{}
+
+			h.flush(&mq, wg, ex)
+			h.debugf("exit")
 			return
 		}
 
+	}
+}
+
+func (h *SumoLogicHook) push(q *messageQueue, msg SumoLogicMesssage, wg *sync.WaitGroup, ex *executor) {
+
+	h.debugf("buffer (%d/%d) %v", len(q.pending), h.batchSize, msg)
+
+	if msgs := q.push(msg); msgs != nil {
+		h.debugf("exceeded messages batch limit with batch of %d messages – flushing", len(msgs))
+		h.sendAsync(msgs, wg, ex)
+	}
+}
+
+func (h *SumoLogicHook) flush(q *messageQueue, wg *sync.WaitGroup, ex *executor) {
+	if msgs := q.flush(); msgs != nil {
+		h.debugf("flushing %d messages", len(msgs))
+		h.sendAsync(msgs, wg, ex)
+
+	}
+}
+
+func (h *SumoLogicHook) debugf(msg string, args ...interface{}) {
+	if h.verbose {
+		h.logger.Printf(msg, args...)
 	}
 }
 
@@ -221,6 +318,6 @@ func (h *SumoLogicHook) log(msg string, args ...interface{}) {
 	}
 }
 
-func (h *SumoLogicHook) logf(msg string, args ...interface{}) {
-	h.logger.Printf(msg, args...)
+func (h *SumoLogicHook) errorf(format string, args ...interface{}) {
+	h.logger.Errorf(format, args...)
 }

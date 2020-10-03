@@ -2,46 +2,57 @@ package sumologrus
 
 import (
 	"bytes"
-	"encoding/json"
-	"github.com/stretchr/testify/assert"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 
 	"github.com/sirupsen/logrus"
 )
 
-func mockServer() (chan []byte, *httptest.Server) {
-	done := make(chan []byte, 1)
+func mockServer() (chan string, *httptest.Server) {
+	done := make(chan string)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		buf := bytes.NewBuffer(nil)
 		io.Copy(buf, r.Body)
-
-		var v interface{}
-		err := json.Unmarshal(buf.Bytes(), &v)
-		if err != nil {
-			panic(err)
-		}
-
-		b, err := json.MarshalIndent(v, "", "  ")
-		if err != nil {
-			panic(err)
-		}
-
-		done <- b
+		done <- buf.String()
 	}))
 
 	return done, server
 }
 
 func TestHook(t *testing.T) {
+	t.Run("Should error if invalid configs", func(t *testing.T) {
+		expectedErrorString1 := "NewWithConfig: negative or 0 time intervals are not supported Config.Interval: -100ms"
+		expectedErrorString2 := "NewWithConfig: negative or 0 batch sizes are not supported Config.BatchSize: -10"
+		_, err1 := NewWithConfig(makeConfig(Config{
+			EndPointURL: "https://example.com",
+			Host:        "admin-lambda-test",
+			Level:       logrus.InfoLevel,
+			Tags:        []string{"tag1", "tag2"},
+			Interval:    -100 * time.Millisecond,
+		}))
+
+		_, err2 := NewWithConfig(makeConfig(Config{
+			EndPointURL: "https://example.com",
+			Host:        "admin-lambda-test",
+			Level:       logrus.InfoLevel,
+			Tags:        []string{"tag1", "tag2"},
+			BatchSize:   -10,
+		}))
+
+		assert.EqualError(t, err1, expectedErrorString1)
+		assert.EqualError(t, err2, expectedErrorString2)
+	})
 	t.Run("Should flush the logs when Flush is called", func(t *testing.T) {
-		var got []byte
-		want := formatBytes([]byte(`[
+		var m sync.Mutex
+		var got, want string
+		want = `[
 			{
 			  "data": {
 				"fields": {
@@ -53,93 +64,7 @@ func TestHook(t *testing.T) {
 			  "host": "admin-lambda-test",
 			  "level": "ERROR",
 			  "tags": null
-			}
-		]`))
-		body, server := mockServer()
-		defer server.Close()
-
-		hook := NewSumoLogicHook(server.URL, "admin-lambda-test", logrus.InfoLevel)
-
-		hook.verbose = true
-
-		log := logrus.New()
-		log.Hooks.Add(hook)
-
-		log.WithFields(logrus.Fields{
-			"name": "kate",
-			"age":  33,
-		}).Error("Hello world!")
-
-		go func() {
-			for b := range body {
-				got = b
-			}
-		}()
-		hook.Flush()
-
-		assert.Equal(t, got, want)
-	})
-
-	t.Run("Should flush the logs after interval", func(t *testing.T) {
-		var got []byte
-		want := formatBytes([]byte(`[
-			{
-			  "data": {
-				"fields": {
-				  "age": 33,
-				  "name": "kate"
-				},
-				"message": "Hello world!"
-			  },
-			  "host": "admin-lambda-test",
-			  "level": "ERROR",
-			  "tags": null
-			}
-		]`))
-		body, server := mockServer()
-		defer server.Close()
-
-		hook := NewSumoLogicHook(server.URL, "admin-lambda-test", logrus.InfoLevel)
-		hook.interval = 100 * time.Millisecond
-		hook.verbose = true
-
-		log := logrus.New()
-		log.Hooks.Add(hook)
-
-		log.WithFields(logrus.Fields{
-			"name": "kate",
-			"age":  33,
-		}).Error("Hello world!")
-
-		go func() {
-			for b := range body {
-				got = b
-			}
-		}()
-		time.Sleep(150 * time.Millisecond)
-		hook.Flush()
-
-		assert.Equal(t, got, want)
-	})
-
-	t.Run("Should flush the logs if batch size is reached", func(t *testing.T) {
-		var got, want bytes.Buffer
-		kate := formatBytes([]byte(`[
-			{
-			  "data": {
-				"fields": {
-				  "age": 33,
-				  "name": "kate"
-				},
-				"message": "Hello world!"
-			  },
-			  "host": "admin-lambda-test",
-			  "level": "ERROR",
-			  "tags": null
-			}
-		]`))
-
-		sawyer := formatBytes([]byte(`[
+			},
 			{
 			  "data": {
 				"fields": {
@@ -152,19 +77,14 @@ func TestHook(t *testing.T) {
 			  "level": "ERROR",
 			  "tags": null
 			}
-		]`))
-
-		want.Write(kate)
-		want.Write(sawyer)
-
+		]`
 		body, server := mockServer()
 		defer server.Close()
 
-		hook := NewSumoLogicHook(server.URL, "admin-lambda-test", logrus.InfoLevel)
-		hook.verbose = true
-		hook.size = 1
+		hook := New(server.URL, "admin-lambda-test", logrus.InfoLevel)
 
 		log := logrus.New()
+		log.SetFormatter(&logrus.TextFormatter{TimestampFormat: time.RFC3339, FullTimestamp: true})
 		log.Hooks.Add(hook)
 
 		log.WithFields(logrus.Fields{
@@ -179,40 +99,122 @@ func TestHook(t *testing.T) {
 
 		go func() {
 			for b := range body {
-				got.Write(b)
+				m.Lock()
+				got = b
+				m.Unlock()
+			}
+		}()
+		hook.Flush()
+
+		m.Lock()
+		assert.JSONEq(t, want, got)
+		m.Unlock()
+	})
+
+	t.Run("Should flush the logs after interval", func(t *testing.T) {
+		var m sync.Mutex
+		var got string
+		want := `[
+			{
+			  "data": {
+				"fields": {
+				  "age": 33,
+				  "name": "kate"
+				},
+				"message": "Hello world!"
+			  },
+			  "host": "admin-lambda-test",
+			  "level": "ERROR",
+			  "tags": ["tag1", "tag2"]
+			}
+		]`
+		body, server := mockServer()
+		defer server.Close()
+
+		hook, _ := NewWithConfig(makeConfig(Config{
+			EndPointURL: server.URL,
+			Host:        "admin-lambda-test",
+			Level:       logrus.InfoLevel,
+			Tags:        []string{"tag1", "tag2"},
+			Interval:    100 * time.Millisecond,
+			Verbose:     true,
+		}))
+
+		log := logrus.New()
+		log.SetFormatter(&logrus.TextFormatter{TimestampFormat: time.RFC3339, FullTimestamp: true})
+		log.Hooks.Add(hook)
+
+		log.WithFields(logrus.Fields{
+			"name": "kate",
+			"age":  33,
+		}).Error("Hello world!")
+
+		go func() {
+			for b := range body {
+				m.Lock()
+				got = b
+				m.Unlock()
+			}
+		}()
+		time.Sleep(150 * time.Millisecond)
+		hook.Flush()
+
+		m.Lock()
+		assert.JSONEq(t, want, got)
+		m.Unlock()
+	})
+
+	t.Run("Should flush the logs if batch size is reached", func(t *testing.T) {
+		var m sync.Mutex
+		var got1, want1 string
+		want1 = `[
+			{
+			  "data": {
+				"fields": {
+				  "age": 33,
+				  "name": "kate"
+				},
+				"message": "Hello world!"
+			  },
+			  "host": "admin-lambda-test",
+			  "level": "ERROR",
+			  "tags": ["tag1", "tag2"]
+			}]`
+
+		body, server := mockServer()
+		defer server.Close()
+
+		hook, _ := NewWithConfig(makeConfig(Config{
+			EndPointURL: server.URL,
+			Host:        "admin-lambda-test",
+			Level:       logrus.InfoLevel,
+			Tags:        []string{"tag1", "tag2"},
+			BatchSize:   1,
+		}))
+
+		log := logrus.New()
+		log.SetFormatter(&logrus.TextFormatter{TimestampFormat: time.RFC3339, FullTimestamp: true})
+		log.Hooks.Add(hook)
+
+		log.WithFields(logrus.Fields{
+			"name": "kate",
+			"age":  33,
+		}).Error("Hello world!")
+
+		go func() {
+			for b := range body {
+				m.Lock()
+				got1 = b
+				m.Unlock()
 			}
 		}()
 
-		time.Sleep(250 * time.Millisecond)
-
-		assert.Equal(t, got.Bytes(), want.Bytes())
-
+		time.Sleep(100 * time.Millisecond)
 		hook.Flush()
+
+		m.Lock()
+		assert.JSONEq(t, want1, got1)
+		m.Unlock()
+
 	})
-}
-
-func JSONBytesEqual(a, b []byte) (bool, error) {
-	var j, j2 interface{}
-	if err := json.Unmarshal(a, &j); err != nil {
-		return false, err
-	}
-	if err := json.Unmarshal(b, &j2); err != nil {
-		return false, err
-	}
-	return reflect.DeepEqual(j2, j), nil
-}
-
-func formatBytes(b []byte) []byte {
-	var v interface{}
-	err := json.Unmarshal(b, &v)
-	if err != nil {
-		panic(err)
-	}
-
-	f, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		panic(err)
-	}
-
-	return f
 }
