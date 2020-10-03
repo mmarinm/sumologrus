@@ -4,15 +4,12 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
-	"fmt"
-	"github.com/sirupsen/logrus"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/segmentio/backo-go"
 	"github.com/sirupsen/logrus"
 )
 
