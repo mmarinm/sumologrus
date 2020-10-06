@@ -136,27 +136,38 @@ func (h *SumoLogicHook) queue(msg SumoLogicMesssage) (err error) {
 	return
 }
 
-func (h *SumoLogicHook) upload(b []byte) error {
+func (h *SumoLogicHook) gZipData(b []byte) (*bytes.Buffer, error) {
 	payload := bytes.Join([][]byte{b}, newline)
 
-	// gzip the bytes to be uploaded
 	var buf bytes.Buffer
-	g := gzip.NewWriter(&buf)
-	if _, err := g.Write(payload); err != nil {
-		h.errorf("error compressing payload - %s", err)
-		return err
+	w := gzip.NewWriter(&buf)
+	if _, err := w.Write(payload); err != nil {
+		h.errorf("error writing into io.Writer - %s", err)
+		return nil, err
 	}
 
-	if err := g.Close(); err != nil {
+	if err := w.Close(); err != nil {
 		h.errorf("error closing write buffer - %s", err)
+		return nil, err
+	}
+
+	return &buf, nil
+}
+
+func (h *SumoLogicHook) upload(b []byte) error {
+	// gzip the payload before uploaded
+	buf, err := h.gZipData(b)
+	if err != nil {
+		h.errorf("error compressing data - %s", err)
 		return err
 	}
 
 	req, err := http.NewRequest(
 		"POST",
 		h.endPointURL,
-		&buf,
+		buf,
 	)
+
 	if err != nil {
 		h.errorf("creating request - %s", err)
 		return err

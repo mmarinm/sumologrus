@@ -2,25 +2,46 @@ package sumologrus
 
 import (
 	"bytes"
-	"io"
+	"compress/gzip"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-
 	"github.com/sirupsen/logrus"
+	"github.com/stretchr/testify/assert"
 )
 
-func mockServer() (chan string, *httptest.Server) {
-	done := make(chan string)
+func gUnzipData(data []byte) (resData []byte, err error) {
+	b := bytes.NewBuffer(data)
+
+	r, err := gzip.NewReader(b)
+	if err != nil {
+		return nil, err
+	}
+
+	var buf bytes.Buffer
+	_, err = buf.ReadFrom(r)
+	if err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+
+func mockServer() (chan []byte, *httptest.Server) {
+	done := make(chan []byte)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		buf := bytes.NewBuffer(nil)
-		io.Copy(buf, r.Body)
-		done <- buf.String()
+		log := logrus.New()
+		responseData, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		done <- responseData
 	}))
 
 	return done, server
@@ -49,10 +70,11 @@ func TestHook(t *testing.T) {
 		assert.EqualError(t, err1, expectedErrorString1)
 		assert.EqualError(t, err2, expectedErrorString2)
 	})
+
 	t.Run("Should flush the logs when Flush is called", func(t *testing.T) {
 		var m sync.Mutex
-		var got, want string
-		want = `[
+		var got []byte
+		want := `[
 			{
 			  "data": {
 				"fields": {
@@ -78,6 +100,7 @@ func TestHook(t *testing.T) {
 			  "tags": null
 			}
 		]`
+
 		body, server := mockServer()
 		defer server.Close()
 
@@ -107,13 +130,15 @@ func TestHook(t *testing.T) {
 		hook.Flush()
 
 		m.Lock()
-		assert.JSONEq(t, want, got)
+		got, err := gUnzipData(got) // uncompress recieved data to be compared as JSON
+		assert.Nil(t, err)
+		assert.JSONEq(t, want, string(got))
 		m.Unlock()
 	})
 
 	t.Run("Should flush the logs after interval", func(t *testing.T) {
 		var m sync.Mutex
-		var got string
+		var got []byte
 		want := `[
 			{
 			  "data": {
@@ -160,14 +185,16 @@ func TestHook(t *testing.T) {
 		hook.Flush()
 
 		m.Lock()
-		assert.JSONEq(t, want, got)
+		got, err := gUnzipData(got) // uncompress recieved data to be compared as JSON
+		assert.Nil(t, err)
+		assert.JSONEq(t, want, string(got))
 		m.Unlock()
 	})
 
 	t.Run("Should flush the logs if batch size is reached", func(t *testing.T) {
 		var m sync.Mutex
-		var got1, want1 string
-		want1 = `[
+		var got []byte
+		want := `[
 			{
 			  "data": {
 				"fields": {
@@ -204,7 +231,7 @@ func TestHook(t *testing.T) {
 		go func() {
 			for b := range body {
 				m.Lock()
-				got1 = b
+				got = b
 				m.Unlock()
 			}
 		}()
@@ -213,7 +240,9 @@ func TestHook(t *testing.T) {
 		hook.Flush()
 
 		m.Lock()
-		assert.JSONEq(t, want1, got1)
+		got, err := gUnzipData(got) // uncompress recieved data to be compared as JSON
+		assert.Nil(t, err)
+		assert.JSONEq(t, want, string(got))
 		m.Unlock()
 
 	})
