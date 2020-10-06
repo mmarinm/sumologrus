@@ -143,10 +143,12 @@ func (h *SumoLogicHook) upload(b []byte) error {
 	var buf bytes.Buffer
 	g := gzip.NewWriter(&buf)
 	if _, err := g.Write(payload); err != nil {
+		h.errorf("error compressing payload - %s", err)
 		return err
 	}
 
 	if err := g.Close(); err != nil {
+		h.errorf("error closing write buffer - %s", err)
 		return err
 	}
 
