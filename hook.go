@@ -175,6 +175,7 @@ func (h *SumoLogicHook) upload(b []byte) error {
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
