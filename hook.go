@@ -2,13 +2,15 @@ package sumologrus
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
-	"github.com/sirupsen/logrus"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 type SumoLogicMesssage struct {
@@ -134,13 +136,38 @@ func (h *SumoLogicHook) queue(msg SumoLogicMesssage) (err error) {
 	return
 }
 
+func (h *SumoLogicHook) gZipData(b []byte) (*bytes.Buffer, error) {
+	payload := bytes.Join([][]byte{b}, newline)
+
+	var buf bytes.Buffer
+	w := gzip.NewWriter(&buf)
+	if _, err := w.Write(payload); err != nil {
+		h.errorf("error writing into io.Writer - %s", err)
+		return nil, err
+	}
+
+	if err := w.Close(); err != nil {
+		h.errorf("error closing write buffer - %s", err)
+		return nil, err
+	}
+
+	return &buf, nil
+}
+
 func (h *SumoLogicHook) upload(b []byte) error {
-	payload := [][]byte{b}
+	// gzip the payload before uploaded
+	buf, err := h.gZipData(b)
+	if err != nil {
+		h.errorf("error compressing data - %s", err)
+		return err
+	}
+
 	req, err := http.NewRequest(
 		"POST",
 		h.endPointURL,
-		bytes.NewBuffer(bytes.Join(payload, newline)),
+		buf,
 	)
+
 	if err != nil {
 		h.errorf("creating request - %s", err)
 		return err
@@ -148,6 +175,7 @@ func (h *SumoLogicHook) upload(b []byte) error {
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
