@@ -130,8 +130,6 @@ func TestHook(t *testing.T) {
 		hook.Flush()
 
 		m.Lock()
-		got, err := gUnzipData(got) // uncompress recieved data to be compared as JSON
-		assert.Nil(t, err)
 		assert.JSONEq(t, want, string(got))
 		m.Unlock()
 	})
@@ -163,6 +161,7 @@ func TestHook(t *testing.T) {
 			Tags:        []string{"tag1", "tag2"},
 			Interval:    100 * time.Millisecond,
 			Verbose:     true,
+			GZip:        true,
 		}))
 
 		log := logrus.New()
@@ -217,6 +216,7 @@ func TestHook(t *testing.T) {
 			Level:       logrus.InfoLevel,
 			Tags:        []string{"tag1", "tag2"},
 			BatchSize:   1,
+			GZip:        true,
 		}))
 
 		log := logrus.New()

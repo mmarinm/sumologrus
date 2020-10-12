@@ -20,6 +20,7 @@ The following tables list the configurable parameters
 |`Level`|Log Level|`logrus.PanicLevel`|
 |`Interval`|Time interval to flush logs |`5s`|
 |`BatchSize`|Limits number of batched logs|`250`|
+|`GZip`|Compresses the payload before uploading|`false`|
 |`Verbose`|Enables Sumorus hook logs|`false`|
 
 
@@ -68,12 +69,13 @@ func main() {
 	log := logrus.New()
 	sumoLogicHook, err := sumologrus.NewWithConfig(sumologrus.Config{
 		EndPointURL: endpoint, 
-		Tags: []string{"tag1", "tag2"},
-		Host: host, 
-		Level: logrus.InfoLevel, 
-		Interval: 3 * time.Second,
-		BatchSize: 10,
-		Verbose: true,
+		Tags:        []string{"tag1", "tag2"},
+		Host:        host, 
+		Level:       logrus.InfoLevel, 
+		Interval:    3 * time.Second,
+		BatchSize:   10,
+		GZip:        true,
+		Verbose:     true,
 	})
 	if err != nil {
 		panic(err)
