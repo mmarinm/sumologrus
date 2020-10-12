@@ -130,8 +130,6 @@ func TestHook(t *testing.T) {
 		hook.Flush()
 
 		m.Lock()
-		// got, err := gUnzipData(got) // uncompress recieved data to be compared as JSON
-		// assert.Nil(t, err)
 		assert.JSONEq(t, want, string(got))
 		m.Unlock()
 	})
