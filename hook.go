@@ -29,6 +29,7 @@ type SumoLogicHook struct {
 	verbose               bool
 	interval              time.Duration
 	batchSize             int
+	gZip                  bool
 	maxConcurrentRequests int
 	retryAfter            func(int) time.Duration
 
@@ -94,6 +95,7 @@ func NewWithConfig(c Config) (*SumoLogicHook, error) {
 		interval:              c.Interval,
 		batchSize:             c.BatchSize,
 		maxConcurrentRequests: c.maxConcurrentRequests,
+		gZip:                  c.GZip,
 		retryAfter:            c.RetryAfter,
 		msgs:                  make(chan SumoLogicMesssage, 100),
 		quit:                  make(chan struct{}),
@@ -154,12 +156,15 @@ func (h *SumoLogicHook) gZipData(b []byte) (*bytes.Buffer, error) {
 	return &buf, nil
 }
 
-func (h *SumoLogicHook) upload(b []byte) error {
-	// gzip the payload before uploaded
-	buf, err := h.gZipData(b)
-	if err != nil {
-		h.errorf("error compressing data - %s", err)
-		return err
+func (h *SumoLogicHook) upload(b []byte) (err error) {
+	buf := bytes.NewBuffer(b)
+
+	if h.gZip {
+		buf, err = h.gZipData(b)
+		if err != nil {
+			h.errorf("error compressing data - %s", err)
+			return err
+		}
 	}
 
 	req, err := http.NewRequest(
@@ -175,7 +180,9 @@ func (h *SumoLogicHook) upload(b []byte) error {
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Encoding", "gzip")
+	if h.gZip {
+		req.Header.Set("Content-Encoding", "gzip")
+	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)

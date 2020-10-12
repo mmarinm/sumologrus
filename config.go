@@ -14,6 +14,7 @@ type Config struct {
 	Interval    time.Duration
 	BatchSize   int
 	Verbose     bool
+	GZip        bool
 
 	// The maximum number of goroutines that will be spawned by a client to send
 	// requests to the backend API.
